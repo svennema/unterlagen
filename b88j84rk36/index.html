@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>Präsentation</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:#0f1614;color:#e9efec;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}
+form{width:100%;max-width:420px}
+h1{font-size:22px;font-weight:600;margin-bottom:8px}
+p{font-size:15px;line-height:1.5;opacity:.75;margin-bottom:22px}
+label{display:block;font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-bottom:8px}
+input{width:100%;font:inherit;font-size:18px;padding:13px 15px;border-radius:10px;border:1px solid #3b4a45;background:#17211e;color:inherit}
+input:focus{outline:2px solid #6fbfa6;outline-offset:1px}
+button{margin-top:14px;width:100%;font:inherit;font-size:17px;font-weight:600;padding:13px 15px;border-radius:10px;border:0;background:#6fbfa6;color:#0f1614;cursor:pointer}
+button[disabled]{opacity:.5;cursor:default}
+#meldung{min-height:22px;margin-top:16px;font-size:15px;opacity:.9}
+#meldung.fehler{color:#ff9a9a}
+#balken{height:4px;border-radius:2px;background:#24332e;margin-top:10px;overflow:hidden;visibility:hidden}
+#balken i{display:block;height:100%;width:0;background:#6fbfa6;transition:width .2s}
+</style>
+</head>
+<body>
+<form id="f" autocomplete="off">
+  <h1>Geschützte Präsentation</h1>
+  <p>Diese Seite ist verschlüsselt. Sie öffnet sich nur mit dem Passwort.</p>
+  <label for="pw">Passwort</label>
+  <input id="pw" type="password" autofocus>
+  <button id="los" type="submit">Öffnen</button>
+  <div id="balken"><i></i></div>
+  <div id="meldung" role="status"></div>
+</form>
+<script>
+(function(){
+  var DURCHGAENGE=600000;
+  var f=document.getElementById('f'),pw=document.getElementById('pw'),los=document.getElementById('los');
+  var meldung=document.getElementById('meldung'),balken=document.getElementById('balken'),strich=balken.firstChild;
+  var paket=null;
+
+  function sag(t,fehler){meldung.textContent=t;meldung.className=fehler?'fehler':'';}
+  function b64(u){var s='';for(var i=0;i<u.length;i++)s+=String.fromCharCode(u[i]);return btoa(s);}
+  function ab64(t){var s=atob(t),u=new Uint8Array(s.length);for(var i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u;}
+
+  async function holen(){
+    if(paket)return paket;
+    var r=await fetch('daten/p.bin');
+    if(!r.ok)throw new Error('laden');
+    var gesamt=+r.headers.get('content-length')||0;
+    if(!r.body||!gesamt){paket=new Uint8Array(await r.arrayBuffer());return paket;}
+    balken.style.visibility='visible';
+    var leser=r.body.getReader(),teile=[],da=0;
+    for(;;){var x=await leser.read();if(x.done)break;teile.push(x.value);da+=x.value.length;strich.style.width=Math.min(100,da/gesamt*100)+'%';}
+    var u=new Uint8Array(da),p=0;teile.forEach(function(t){u.set(t,p);p+=t.length;});
+    paket=u;return u;
+  }
+  async function ableiten(wort,salz){
+    var m=await crypto.subtle.importKey('raw',new TextEncoder().encode(wort),'PBKDF2',false,['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',salt:salz,iterations:DURCHGAENGE,hash:'SHA-256'},m,256));
+  }
+  async function oeffnen(roh,u){
+    var k=await crypto.subtle.importKey('raw',roh,'AES-GCM',false,['decrypt']);
+    return crypto.subtle.decrypt({name:'AES-GCM',iv:u.slice(16,28)},k,u.slice(28));
+  }
+  function zeigen(klar,roh){
+    try{sessionStorage.setItem('pk',b64(roh));}catch(e){}
+    window.__pk=b64(roh);
+    var seite=new TextDecoder().decode(klar);
+    document.open();document.write(seite);document.close();
+  }
+  async function versuch(roh,wort){
+    los.disabled=true;
+    try{
+      sag('Wird geladen …');
+      var u=await holen();
+      sag('Wird geöffnet …');
+      if(!roh)roh=await ableiten(wort,u.slice(0,16));
+      var klar;
+      try{klar=await oeffnen(roh,u);}catch(e){sag(wort===null?'':'Das Passwort stimmt nicht.',true);try{sessionStorage.removeItem('pk');}catch(e2){}los.disabled=false;balken.style.visibility='hidden';pw.select();return;}
+      zeigen(klar,roh);
+    }catch(e){sag('Die Seite ließ sich nicht laden. Bitte Verbindung prüfen und neu versuchen.',true);los.disabled=false;}
+  }
+
+  if(!window.crypto||!crypto.subtle){sag('Dieser Browser kann die Seite nicht entschlüsseln. Bitte einen aktuellen Browser verwenden.',true);los.disabled=true;return;}
+  f.addEventListener('submit',function(e){e.preventDefault();if(pw.value)versuch(null,pw.value);});
+  var gemerkt=null;try{gemerkt=sessionStorage.getItem('pk');}catch(e){}
+  if(gemerkt){versuch(ab64(gemerkt),null);}
+})();
+</script>
+</body>
+</html>
